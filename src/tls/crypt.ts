@@ -5,6 +5,29 @@ import * as crypto from 'crypto';
 import DuplexPair from 'native-duplexpair';
 import NodeCache from 'node-cache';
 import { ILogger } from '../interfaces/Logger.js';
+import config from '../../config.js';
+const ocsp = require('ocsp');
+
+const ocspCache = new ocsp.Cache();
+const ocspHandler = tls.createServer({
+               ...config.certificate,
+               enableTrace: true,
+               rejectUnauthorized: true,
+       },
+       (_socket) => {}
+);
+
+ocspHandler.on('OCSPRequest', (cert, issuer, callback) => {
+       ocsp.getOCSPURI(cert, (err, uri) => {
+               if (err) return callback(err, Buffer.from([]));
+               const req = ocsp.request.generate(cert, issuer);
+               const options = {
+                       url: uri,
+                       ocsp: req.data,
+               };
+               ocspCache.request(req.id, options, callback);
+       });
+});
 
 export interface ITLSServer {
 	events: events.EventEmitter;
@@ -25,6 +48,7 @@ export function startTLSServer(tlsOptions: tls.SecureContextOptions, logger: ILo
 
 	const cleartext = new tls.TLSSocket(duplexpair.socket1, {
 		secureContext,
+		server: ocspHandler,
 		isServer: true,
 		// enableTrace: true,
 		rejectUnauthorized: false,
